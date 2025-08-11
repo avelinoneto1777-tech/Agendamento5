@@ -19,37 +19,44 @@ import {
 } from "firebase/firestore";
 import { initializeApp } from "firebase/app";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { ptBR } from 'date-fns/locale';
 
 // Ícones utilizando lucide-react para um visual moderno
-import {
-  User as GoogleIcon,
-  Trash2 as TrashIcon,
-  X as CloseIcon,
-  Calendar as CalendarIcon,
-  ClipboardList as ClipboardListIcon,
-  LogOut as LogoutIcon,
-  User as UserIcon,
-} from "lucide-react";
+import { 
+  User as GoogleIcon, 
+  Trash2 as TrashIcon, 
+  X as CloseIcon, 
+  Calendar as CalendarIcon, 
+  ClipboardList as ClipboardListIcon, 
+  LogOut as LogoutIcon, 
+  Sun as SunIcon, 
+  Moon as MoonIcon 
+} from 'lucide-react';
 
 // ====================================================================
 // ====================================================================
-// Sua configuração do Firebase (mantida da versão anterior)
+// Configuração do Firebase (usando variáveis de ambiente por segurança)
 // ====================================================================
 // ====================================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyAh1UHya83-uANm6RYmOt-Fk885WIJTe0U",
-  authDomain: "agendamento-de-ambientes.firebaseapp.com",
-  projectId: "agendamento-de-ambientes",
-  storageBucket: "agendamento-de-ambientes.firebasestorage.app",
-  messagingSenderId: "436747247500",
-  appId: "1:436747247500:web:d9438aab4b29c3d8f900a9",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
 // Inicializa o Firebase e Firestore fora do componente para evitar reinicializações
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (error) {
+  console.error("Erro ao inicializar o Firebase. Verifique se as variáveis de ambiente estão configuradas corretamente.", error);
+}
+
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
 
 // Seus dados estáticos com emojis
 const ambientes = [
@@ -122,14 +129,13 @@ interface Mensagem {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(true); // Novo estado para o tema
 
   const [dataSelecionada, setDataSelecionada] = useState(
     format(new Date(), "yyyy-MM-dd")
   );
   const [ambienteSelecionado, setAmbienteSelecionado] = useState<string>("");
-  const [horariosSelecionados, setHorariosSelecionados] = useState<string[]>(
-    []
-  );
+  const [horariosSelecionados, setHorariosSelecionados] = useState<string[]>([]);
   const [turmaSelecionada, setTurmaSelecionada] = useState<string>("");
   const [professorSelecionado, setProfessorSelecionado] = useState<string>("");
 
@@ -142,6 +148,10 @@ export default function App() {
 
   // Observa o estado de autenticação do usuário
   useEffect(() => {
+    if (!auth) {
+      setLoadingUser(false);
+      return;
+    }
     const unsub = onAuthStateChanged(auth, (usuario) => {
       setUser(usuario);
       setLoadingUser(false);
@@ -151,7 +161,7 @@ export default function App() {
 
   // Busca reservas para o ambiente e data selecionados (visualização de reserva)
   useEffect(() => {
-    if (!ambienteSelecionado || !dataSelecionada) {
+    if (!ambienteSelecionado || !dataSelecionada || !db) {
       setReservas([]);
       return;
     }
@@ -183,15 +193,12 @@ export default function App() {
 
   // Busca TODAS as reservas do dia para o relatório
   useEffect(() => {
-    if (!dataSelecionada) {
+    if (!dataSelecionada || !db) {
       setRelatorioReservas([]);
       return;
     }
     setLoadingReservas(true);
-    const q = query(
-      collection(db, "reservas"),
-      where("data", "==", dataSelecionada)
-    );
+    const q = query(collection(db, "reservas"), where("data", "==", dataSelecionada));
     const unsub = onSnapshot(
       q,
       (snapshot) => {
@@ -203,14 +210,10 @@ export default function App() {
         // Adiciona o nome do ambiente ao objeto de reserva
         const listaComNomes = lista.map((reserva) => ({
           ...reserva,
-          nomeAmbiente:
-            ambientes.find((amb) => amb.id === reserva.ambienteId)?.nome ||
-            "Desconhecido",
+          nomeAmbiente: ambientes.find((amb) => amb.id === reserva.ambienteId)?.nome || "Desconhecido",
         }));
 
-        setRelatorioReservas(
-          listaComNomes.sort((a, b) => a.horario.localeCompare(b.horario))
-        );
+        setRelatorioReservas(listaComNomes.sort((a, b) => a.horario.localeCompare(b.horario)));
         setLoadingReservas(false);
       },
       (error) => {
@@ -226,14 +229,16 @@ export default function App() {
     if (isChecked) {
       setHorariosSelecionados([...horariosSelecionados, horario]);
     } else {
-      setHorariosSelecionados(
-        horariosSelecionados.filter((h) => h !== horario)
-      );
+      setHorariosSelecionados(horariosSelecionados.filter((h) => h !== horario));
     }
   };
 
   // Funções de login e logout com Google
   const loginGoogle = () => {
+    if (!auth) {
+      setMensagem({ tipo: "erro", texto: "Erro de autenticação. Tente novamente mais tarde." });
+      return;
+    }
     const provider = new GoogleAuthProvider();
     signInWithPopup(auth, provider).catch((error) => {
       setMensagem({ tipo: "erro", texto: error.message });
@@ -241,6 +246,7 @@ export default function App() {
   };
 
   const logout = () => {
+    if (!auth) return;
     signOut(auth).catch((error) => {
       setMensagem({ tipo: "erro", texto: error.message });
     });
@@ -253,12 +259,11 @@ export default function App() {
       !dataSelecionada ||
       horariosSelecionados.length === 0 ||
       !turmaSelecionada ||
-      !professorSelecionado
+      !professorSelecionado ||
+      !db ||
+      !user
     ) {
-      setMensagem({
-        tipo: "erro",
-        texto: "Preencha todos os campos para reservar.",
-      });
+      setMensagem({ tipo: "erro", texto: "Preencha todos os campos para reservar." });
       return;
     }
 
@@ -268,9 +273,7 @@ export default function App() {
     if (conflitos.length > 0) {
       setMensagem({
         tipo: "erro",
-        texto: `Os seguintes horários já estão reservados: ${conflitos.join(
-          ", "
-        )}`,
+        texto: `Os seguintes horários já estão reservados: ${conflitos.join(", ")}`,
       });
       return;
     }
@@ -290,37 +293,81 @@ export default function App() {
 
     try {
       await Promise.all(promessasDeSalvar);
-      setMensagem({
-        tipo: "sucesso",
-        texto: "Reservas realizadas com sucesso!",
-      });
+      setMensagem({ tipo: "sucesso", texto: "Reservas realizadas com sucesso!" });
       setHorariosSelecionados([]);
       setTurmaSelecionada("");
       setProfessorSelecionado("");
     } catch (error: any) {
-      setMensagem({
-        tipo: "erro",
-        texto: "Erro ao salvar reservas: " + error.message,
-      });
+      setMensagem({ tipo: "erro", texto: "Erro ao salvar reservas: " + error.message });
     }
   };
 
   // Função para excluir uma reserva
   const excluirReserva = async (id: string) => {
+    if (!db) return;
     try {
       await deleteDoc(doc(db, "reservas", id));
       setMensagem({ tipo: "sucesso", texto: "Reserva excluída com sucesso!" });
     } catch (error: any) {
-      setMensagem({
-        tipo: "erro",
-        texto: "Erro ao excluir reserva: " + error.message,
-      });
+      setMensagem({ tipo: "erro", texto: "Erro ao excluir reserva: " + error.message });
     }
   };
 
+  const themeClasses = isDarkMode 
+    ? {
+        bg: "bg-slate-900",
+        containerBg: "bg-slate-800",
+        text: "text-gray-200",
+        textLight: "text-gray-400",
+        cardBorder: "border-slate-700",
+        headerText: "text-white",
+        inputBg: "bg-slate-700",
+        inputBorder: "border-slate-600",
+        tableHeaderBg: "bg-slate-800",
+        tableHeaderTextColor: "text-indigo-400",
+        tableRowBg1: "bg-slate-800",
+        tableRowBg2: "bg-slate-700",
+        tableHoverBg: "hover:bg-slate-600",
+        messageSuccessBg: "bg-green-900",
+        messageSuccessText: "text-green-300",
+        messageErrorBg: "bg-red-900",
+        messageErrorText: "text-red-300",
+        buttonActiveBg: "bg-indigo-600",
+        buttonActiveText: "text-white",
+        buttonInactiveBg: "bg-slate-700",
+        buttonInactiveText: "text-gray-300",
+        buttonHoverBg: "hover:bg-indigo-700",
+        toggleIconColor: "text-yellow-400",
+      }
+    : {
+        bg: "bg-gradient-to-br from-blue-50 to-indigo-100",
+        containerBg: "bg-white",
+        text: "text-gray-800",
+        textLight: "text-gray-600",
+        cardBorder: "border-gray-200",
+        headerText: "text-blue-900",
+        inputBg: "bg-white",
+        inputBorder: "border-gray-300",
+        tableHeaderBg: "bg-blue-100",
+        tableHeaderTextColor: "text-blue-800",
+        tableRowBg1: "bg-white",
+        tableRowBg2: "bg-gray-50",
+        tableHoverBg: "hover:bg-blue-50",
+        messageSuccessBg: "bg-green-100",
+        messageSuccessText: "text-green-700",
+        messageErrorBg: "bg-red-100",
+        messageErrorText: "text-red-700",
+        buttonActiveBg: "bg-blue-600",
+        buttonActiveText: "text-white",
+        buttonInactiveBg: "bg-gray-200",
+        buttonInactiveText: "text-gray-700",
+        buttonHoverBg: "hover:bg-blue-100",
+        toggleIconColor: "text-blue-600",
+      };
+
   if (loadingUser) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-gray-700 font-poppins bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className={`flex items-center justify-center min-h-screen text-gray-200 font-poppins ${themeClasses.bg}`}>
         Carregando...
       </div>
     );
@@ -328,33 +375,33 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 font-poppins p-8 text-gray-800">
-        <div className="text-center p-8 bg-white rounded-3xl shadow-xl max-w-md mx-auto">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-blue-900 drop-shadow-md">
+      <div className={`flex flex-col items-center justify-center min-h-screen ${themeClasses.bg} font-poppins p-8 ${themeClasses.text}`}>
+        <div className={`text-center p-8 ${themeClasses.containerBg} rounded-3xl shadow-xl max-w-md mx-auto border ${themeClasses.cardBorder}`}>
+          <h1 className={`text-3xl md:text-4xl font-extrabold ${themeClasses.headerText} drop-shadow-md`}>
             EEMTI Jader de Figueiredo Correia
           </h1>
-          <h2 className="text-xl md:text-2xl mb-8 mt-2 text-gray-600 font-semibold">
+          <h2 className="text-xl md:text-2xl mb-8 mt-2 text-gray-400 font-semibold">
             Agendamento de Ambientes
           </h2>
           <button
             onClick={loginGoogle}
-            className="flex items-center justify-center w-full px-6 py-3 text-lg bg-blue-600 text-white font-semibold rounded-full shadow-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105"
+            className="flex items-center justify-center w-full px-6 py-3 text-lg bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transition-all duration-300 transform hover:scale-105"
           >
             <GoogleIcon className="mr-3 h-6 w-6" /> Entrar com Google
           </button>
         </div>
         {mensagem && (
           <div
-            className={`mt-6 p-4 rounded-lg flex justify-between items-center shadow-lg ${
+            className={`mt-6 p-4 rounded-lg flex justify-between items-center shadow-lg border ${
               mensagem.tipo === "sucesso"
-                ? "bg-green-100 text-green-700 border border-green-200"
-                : "bg-red-100 text-red-700 border border-red-200"
+                ? `${themeClasses.messageSuccessBg} ${themeClasses.messageSuccessText} border-green-700`
+                : `${themeClasses.messageErrorBg} ${themeClasses.messageErrorText} border-red-700`
             }`}
           >
             <span>{mensagem.texto}</span>
             <button
               onClick={() => setMensagem(null)}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-gray-400 hover:text-white transition-colors"
             >
               <CloseIcon size={16} />
             </button>
@@ -365,45 +412,49 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen p-4 md:p-8 font-poppins text-gray-800 bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className={`min-h-screen p-4 md:p-8 font-poppins ${themeClasses.text} ${themeClasses.bg}`}>
       <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link
-        rel="preconnect"
-        href="https://fonts.gstatic.com"
-        crossOrigin="anonymous"
-      />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap"
-        rel="stylesheet"
-      />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       <div className="max-w-6xl mx-auto">
-        <header className="bg-white rounded-3xl shadow-lg p-5 md:p-8 mb-6 flex flex-col items-center text-center">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-blue-900 drop-shadow-md">
+        <header className={`${themeClasses.containerBg} rounded-3xl shadow-lg p-5 md:p-8 mb-6 flex flex-col items-center text-center border ${themeClasses.cardBorder}`}>
+          <h1 className={`text-3xl md:text-4xl font-extrabold ${themeClasses.headerText} drop-shadow-md`}>
             EEMTI Jader de Figueiredo Correia
           </h1>
           <div className="flex flex-col md:flex-row justify-between w-full mt-4 items-center gap-4">
-            <div className="flex items-center text-lg md:text-xl font-semibold text-gray-700">
-              <UserIcon className="mr-2 text-blue-600" size={24} /> Olá,{" "}
-              {user.displayName} 👋
+            <div className={`flex items-center text-lg md:text-xl font-semibold ${themeClasses.textLight}`}>
+              <GoogleIcon className={`mr-2 ${themeClasses.headerText}`} size={24} /> Olá, {user.displayName} 👋
             </div>
-            <button
-              onClick={logout}
-              className="px-6 py-2 bg-red-600 text-white font-semibold rounded-full shadow-lg hover:bg-red-700 transition-all duration-300 transform hover:scale-105 flex items-center"
-            >
-              <LogoutIcon className="mr-2 h-5 w-5" /> Sair
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={`p-2 rounded-full transition-all duration-300 transform hover:scale-110 ${themeClasses.buttonInactiveBg}`}
+              >
+                {isDarkMode ? (
+                  <SunIcon className={`h-5 w-5 ${themeClasses.toggleIconColor}`} />
+                ) : (
+                  <MoonIcon className={`h-5 w-5 ${themeClasses.toggleIconColor}`} />
+                )}
+              </button>
+              <button
+                onClick={logout}
+                className="px-6 py-2 bg-red-600 text-white font-semibold rounded-full shadow-lg hover:bg-red-700 transition-all duration-300 transform hover:scale-105 flex items-center"
+              >
+                <LogoutIcon className="mr-2 h-5 w-5" /> Sair
+              </button>
+            </div>
           </div>
         </header>
 
         {/* Navegação entre as visualizações */}
-        <div className="flex justify-center space-x-2 md:space-x-4 mb-6 p-2 rounded-2xl bg-white shadow-lg">
+        <div className={`flex justify-center space-x-2 md:space-x-4 mb-6 p-2 rounded-2xl ${themeClasses.containerBg} shadow-lg border ${themeClasses.cardBorder}`}>
           <button
             onClick={() => setView("reserva")}
             className={`flex-1 flex justify-center items-center px-4 md:px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 ${
               view === "reserva"
-                ? "bg-blue-600 text-white shadow-xl"
-                : "bg-gray-200 text-gray-700 hover:bg-blue-100"
+                ? `${themeClasses.buttonActiveBg} ${themeClasses.buttonActiveText} shadow-xl`
+                : `${themeClasses.buttonInactiveBg} ${themeClasses.buttonInactiveText} ${themeClasses.buttonHoverBg}`
             }`}
           >
             <CalendarIcon className="mr-2 h-5 w-5" /> Fazer Reserva
@@ -412,8 +463,8 @@ export default function App() {
             onClick={() => setView("relatorio")}
             className={`flex-1 flex justify-center items-center px-4 md:px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 ${
               view === "relatorio"
-                ? "bg-blue-600 text-white shadow-xl"
-                : "bg-gray-200 text-gray-700 hover:bg-blue-100"
+                ? `${themeClasses.buttonActiveBg} ${themeClasses.buttonActiveText} shadow-xl`
+                : `${themeClasses.buttonInactiveBg} ${themeClasses.buttonInactiveText} ${themeClasses.buttonHoverBg}`
             }`}
           >
             <ClipboardListIcon className="mr-2 h-5 w-5" /> Relatório de Reservas
@@ -423,16 +474,16 @@ export default function App() {
         {/* Seção de Mensagens */}
         {mensagem && (
           <div
-            className={`p-4 rounded-xl mb-6 flex justify-between items-center shadow-lg transition-all duration-300 ${
+            className={`p-4 rounded-xl mb-6 flex justify-between items-center shadow-lg transition-all duration-300 border ${
               mensagem.tipo === "sucesso"
-                ? "bg-green-100 text-green-700 border border-green-200"
-                : "bg-red-100 text-red-700 border border-red-200"
-            }`}
+                ? `${themeClasses.messageSuccessBg} ${themeClasses.messageSuccessText} border-green-700`
+                : `${themeClasses.messageErrorBg} ${themeClasses.messageErrorText} border-red-700`
+              }`}
           >
             <span>{mensagem.texto}</span>
             <button
               onClick={() => setMensagem(null)}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-gray-400 hover:text-white transition-colors"
             >
               <CloseIcon size={16} />
             </button>
@@ -441,38 +492,28 @@ export default function App() {
 
         {/* Visualização de Fazer Reserva */}
         {view === "reserva" && (
-          <section className="p-6 bg-white rounded-3xl shadow-2xl">
-            <h2 className="text-2xl font-bold mb-6 text-gray-700 flex items-center">
+          <section className={`p-6 ${themeClasses.containerBg} rounded-3xl shadow-2xl border ${themeClasses.cardBorder}`}>
+            <h2 className={`text-2xl font-bold mb-6 ${themeClasses.text} flex items-center`}>
               <span className="mr-2">📝</span> Nova Reserva
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div>
-                <label
-                  htmlFor="data"
-                  className="block text-gray-600 font-medium mb-1"
-                >
-                  Data
-                </label>
+                <label htmlFor="data" className={`block ${themeClasses.textLight} font-medium mb-1`}>Data</label>
                 <input
                   type="date"
                   id="data"
                   value={dataSelecionada}
                   onChange={(e) => setDataSelecionada(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all"
+                  className={`w-full p-3 ${themeClasses.inputBg} ${themeClasses.text} border ${themeClasses.inputBorder} rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 transition-all`}
                 />
               </div>
               <div>
-                <label
-                  htmlFor="ambiente"
-                  className="block text-gray-600 font-medium mb-1"
-                >
-                  Ambiente
-                </label>
+                <label htmlFor="ambiente" className={`block ${themeClasses.textLight} font-medium mb-1`}>Ambiente</label>
                 <select
                   id="ambiente"
                   value={ambienteSelecionado}
                   onChange={(e) => setAmbienteSelecionado(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all"
+                  className={`w-full p-3 ${themeClasses.inputBg} ${themeClasses.text} border ${themeClasses.inputBorder} rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 transition-all`}
                 >
                   <option value="">-- Selecione --</option>
                   {ambientes.map((amb) => (
@@ -483,17 +524,12 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <label
-                  htmlFor="turma"
-                  className="block text-gray-600 font-medium mb-1"
-                >
-                  Turma
-                </label>
+                <label htmlFor="turma" className={`block ${themeClasses.textLight} font-medium mb-1`}>Turma</label>
                 <select
                   id="turma"
                   value={turmaSelecionada}
                   onChange={(e) => setTurmaSelecionada(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all"
+                  className={`w-full p-3 ${themeClasses.inputBg} ${themeClasses.text} border ${themeClasses.inputBorder} rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 transition-all`}
                 >
                   <option value="">-- Selecione --</option>
                   {turmas.map((t) => (
@@ -504,17 +540,12 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <label
-                  htmlFor="professor"
-                  className="block text-gray-600 font-medium mb-1"
-                >
-                  Professor
-                </label>
+                <label htmlFor="professor" className={`block ${themeClasses.textLight} font-medium mb-1`}>Professor</label>
                 <select
                   id="professor"
                   value={professorSelecionado}
                   onChange={(e) => setProfessorSelecionado(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all"
+                  className={`w-full p-3 ${themeClasses.inputBg} ${themeClasses.text} border ${themeClasses.inputBorder} rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 transition-all`}
                 >
                   <option value="">-- Selecione --</option>
                   {professores.map((p) => (
@@ -526,9 +557,7 @@ export default function App() {
               </div>
             </div>
 
-            <h3 className="text-xl font-bold mb-4 text-gray-700">
-              Horários Disponíveis
-            </h3>
+            <h3 className={`text-xl font-bold mb-4 ${themeClasses.text}`}>Horários Disponíveis</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {horarios.map((h, i) => {
                 const reservado = reservas.some((r) => r.horario === h);
@@ -537,31 +566,23 @@ export default function App() {
                 return (
                   <div key={i}>
                     <label
-                      className={`flex flex-col justify-center items-center p-3 rounded-xl shadow-md transition-all duration-200 cursor-pointer ${
+                      className={`flex flex-col justify-center items-center p-3 rounded-xl shadow-md transition-all duration-200 cursor-pointer border ${themeClasses.cardBorder} ${
                         reservado
-                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                          ? `bg-slate-700 text-gray-500 cursor-not-allowed`
                           : isChecked
-                          ? "bg-green-100 border-2 border-green-500 text-green-800"
-                          : "bg-white hover:bg-blue-50"
+                          ? "bg-indigo-600 border-2 border-indigo-500 text-white"
+                          : `${themeClasses.containerBg} ${themeClasses.text} ${themeClasses.buttonHoverBg}`
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         disabled={reservado}
-                        onChange={(e) =>
-                          handleHorarioSelection(h, e.target.checked)
-                        }
-                        className="form-checkbox text-blue-600 h-5 w-5 mb-2"
+                        onChange={(e) => handleHorarioSelection(h, e.target.checked)}
+                        className="form-checkbox text-indigo-600 h-5 w-5 mb-2"
                       />
-                      <span className="text-center text-sm font-semibold">
-                        {h}
-                      </span>
-                      {reservado && (
-                        <span className="text-xs text-gray-500 mt-1">
-                          (Reservado)
-                        </span>
-                      )}
+                      <span className="text-center text-sm font-semibold">{h}</span>
+                      {reservado && <span className="text-xs text-gray-500 mt-1">(Reservado)</span>}
                     </label>
                   </div>
                 );
@@ -570,19 +591,11 @@ export default function App() {
 
             <button
               onClick={salvarReserva}
-              disabled={
-                !user ||
-                horariosSelecionados.length === 0 ||
-                !turmaSelecionada ||
-                !professorSelecionado
-              }
+              disabled={!user || horariosSelecionados.length === 0 || !turmaSelecionada || !professorSelecionado}
               className={`mt-8 w-full py-3 rounded-full font-bold text-white transition-all duration-300 transform ${
-                user &&
-                horariosSelecionados.length > 0 &&
-                turmaSelecionada &&
-                professorSelecionado
-                  ? "bg-green-600 hover:bg-green-700 shadow-xl hover:scale-105"
-                  : "bg-gray-400 cursor-not-allowed"
+                user && horariosSelecionados.length > 0 && turmaSelecionada && professorSelecionado
+                  ? "bg-emerald-600 hover:bg-emerald-700 shadow-xl hover:scale-105"
+                  : "bg-gray-600 cursor-not-allowed"
               }`}
             >
               Confirmar Reserva
@@ -592,16 +605,12 @@ export default function App() {
 
         {/* Visualização de Relatório */}
         {view === "relatorio" && (
-          <section className="p-6 bg-white rounded-3xl shadow-2xl">
-            <h2 className="text-2xl font-bold mb-6 text-gray-700 flex items-center">
-              <ClipboardListIcon className="mr-2 h-6 w-6" /> Relatório de
-              Reservas do Dia
+          <section className={`p-6 ${themeClasses.containerBg} rounded-3xl shadow-2xl border ${themeClasses.cardBorder}`}>
+            <h2 className={`text-2xl font-bold mb-6 ${themeClasses.text} flex items-center`}>
+              <ClipboardListIcon className="mr-2 h-6 w-6 text-indigo-400" /> Relatório de Reservas do Dia
             </h2>
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-              <label
-                htmlFor="relatorioData"
-                className="block text-gray-600 font-medium"
-              >
+              <label htmlFor="relatorioData" className={`block ${themeClasses.textLight} font-medium`}>
                 Selecione a data:
               </label>
               <input
@@ -609,56 +618,37 @@ export default function App() {
                 id="relatorioData"
                 value={dataSelecionada}
                 onChange={(e) => setDataSelecionada(e.target.value)}
-                className="w-full md:w-1/3 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all"
+                className={`w-full md:w-1/3 p-3 ${themeClasses.inputBg} ${themeClasses.text} border ${themeClasses.inputBorder} rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-500 transition-all`}
               />
             </div>
 
             {loadingReservas ? (
-              <p className="text-center text-gray-500">
-                Carregando reservas...
-              </p>
+              <p className="text-center text-gray-500">Carregando reservas...</p>
             ) : relatorioReservas.length === 0 ? (
-              <p className="text-center text-gray-500">
-                Nenhuma reserva registrada para esta data.
-              </p>
+              <p className="text-center text-gray-500">Nenhuma reserva registrada para esta data.</p>
             ) : (
-              <div className="overflow-x-auto rounded-xl shadow-md border border-gray-200">
-                <table className="min-w-full bg-white">
+              <div className="overflow-x-auto rounded-xl shadow-md border border-slate-700">
+                <table className={`min-w-full ${isDarkMode ? 'bg-slate-900' : 'bg-white'}`}>
                   <thead>
-                    <tr className="text-left border-b-2 border-gray-300 bg-blue-100">
-                      <th className="py-4 px-4 font-bold text-blue-800">
-                        Ambiente
-                      </th>
-                      <th className="py-4 px-4 font-bold text-blue-800">
-                        Horário
-                      </th>
-                      <th className="py-4 px-4 font-bold text-blue-800">
-                        Turma
-                      </th>
-                      <th className="py-4 px-4 font-bold text-blue-800">
-                        Professor
-                      </th>
-                      <th className="py-4 px-4 font-bold text-blue-800">
-                        Responsável
-                      </th>
-                      <th className="py-4 px-4 font-bold text-blue-800 text-center">
-                        Ações
-                      </th>
+                    <tr className={`text-left border-b ${themeClasses.cardBorder} ${isDarkMode ? 'bg-slate-800' : 'bg-blue-100'}`}>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor}`}>Ambiente</th>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor}`}>Horário</th>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor}`}>Turma</th>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor}`}>Professor</th>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor}`}>Responsável</th>
+                      <th className={`py-4 px-4 font-bold ${themeClasses.tableHeaderTextColor} text-center`}>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {relatorioReservas.map((r, index) => (
                       <tr
                         key={r.id}
-                        className={`border-b border-gray-200 transition-colors ${
-                          index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                        } hover:bg-blue-50`}
+                        className={`border-b ${themeClasses.cardBorder} transition-colors ${
+                          index % 2 === 0 ? themeClasses.tableRowBg1 : themeClasses.tableRowBg2
+                        } ${themeClasses.tableHoverBg}`}
                       >
                         <td className="py-3 px-4">
-                          {
-                            ambientes.find((amb) => amb.id === r.ambienteId)
-                              ?.nome
-                          }
+                          {ambientes.find((amb) => amb.id === r.ambienteId)?.nome}
                         </td>
                         <td className="py-3 px-4">{r.horario}</td>
                         <td className="py-3 px-4">{r.turma}</td>
@@ -668,12 +658,12 @@ export default function App() {
                           {user && r.usuarioId === user.uid ? (
                             <button
                               onClick={() => excluirReserva(r.id)}
-                              className="text-red-500 hover:text-red-700 transition-colors transform hover:scale-110"
+                              className="text-red-500 hover:text-red-400 transition-colors transform hover:scale-110"
                             >
                               <TrashIcon size={20} />
                             </button>
                           ) : (
-                            <span className="text-gray-400">-</span>
+                            <span className="text-gray-600">-</span>
                           )}
                         </td>
                       </tr>
