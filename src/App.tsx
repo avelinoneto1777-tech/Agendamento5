@@ -22,11 +22,11 @@ import { format } from "date-fns";
 import { ptBR } from 'date-fns/locale';
 
 // Ícones utilizando lucide-react para um visual moderno
-import { User as GoogleIcon, Trash2 as TrashIcon, X as CloseIcon, Calendar as CalendarIcon, ClipboardList as ClipboardListIcon, LogOut as LogoutIcon, User as UserIcon } from 'lucide-react';
+import { User as GoogleIcon, Trash2 as TrashIcon, X as CloseIcon, Calendar as CalendarIcon, ClipboardList as ClipboardListIcon, LogOut as LogoutIcon, User as UserIcon, Loader2 as LoaderIcon } from 'lucide-react';
 
 // ====================================================================
 // ====================================================================
-// Configuração do Firebase (usando variáveis de ambiente por segurança)
+// Configuração do Firebase
 // ====================================================================
 // ====================================================================
 const firebaseConfig = {
@@ -39,26 +39,8 @@ const firebaseConfig = {
 };
 
 // ====================================================================
-// Inicialização do Firebase fora do componente para evitar reinicializações
-// e para garantir que a aplicação não falhe caso as variáveis não existam.
+// Dados estáticos da aplicação
 // ====================================================================
-let app;
-let auth;
-let db;
-try {
-  // Verifica se a chave de API existe antes de inicializar o app
-  if (firebaseConfig.apiKey) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  } else {
-    console.error("Firebase: As variáveis de ambiente não foram carregadas. Verifique a configuração do Vercel.");
-  }
-} catch (error) {
-  console.error("Erro fatal ao inicializar o Firebase. Verifique sua configuração e as variáveis de ambiente.", error);
-}
-
-// Seus dados estáticos com emojis
 const ambientes = [
   { id: "informatica1", nome: "Laboratório de Informática I 💻" },
   { id: "informatica2", nome: "Laboratório de Informática II 💻" },
@@ -127,6 +109,12 @@ interface Mensagem {
 }
 
 export default function App() {
+  // ====================================================================
+  // Estados do componente
+  // ====================================================================
+  const [app, setApp] = useState<any>(null);
+  const [auth, setAuth] = useState<any>(null);
+  const [db, setDb] = useState<any>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
@@ -145,22 +133,47 @@ export default function App() {
   const [mensagem, setMensagem] = useState<Mensagem | null>(null);
   const [view, setView] = useState<"reserva" | "relatorio">("reserva");
 
-  // Observa o estado de autenticação do usuário
+  // ====================================================================
+  // Efeito principal: Inicializa o Firebase e o listener de autenticação
+  // ====================================================================
   useEffect(() => {
-    if (!auth) {
-      setLoadingUser(false);
-      return;
-    }
-    const unsub = onAuthStateChanged(auth, (usuario) => {
-      setUser(usuario);
-      setLoadingUser(false);
-    });
-    return () => unsub();
-  }, []);
+    // Só inicializa o Firebase uma vez, se a chave de API existir
+    if (!app && firebaseConfig.apiKey) {
+      try {
+        const firebaseApp = initializeApp(firebaseConfig);
+        const firebaseAuth = getAuth(firebaseApp);
+        const firestoreDb = getFirestore(firebaseApp);
+        
+        setApp(firebaseApp);
+        setAuth(firebaseAuth);
+        setDb(firestoreDb);
 
-  // Busca reservas para o ambiente e data selecionados (visualização de reserva)
+        // O listener de autenticação será responsável por atualizar o estado do usuário
+        // e por definir `loadingUser` como false quando a autenticação for concluída.
+        const unsub = onAuthStateChanged(firebaseAuth, (currentUser) => {
+          setUser(currentUser);
+          setLoadingUser(false);
+        });
+
+        // Retorna a função de limpeza do listener
+        return () => unsub();
+
+      } catch (error) {
+        console.error("Erro ao inicializar o Firebase. Verifique a configuração e as variáveis de ambiente.", error);
+        setLoadingUser(false);
+      }
+    } else {
+      // Se a chave não existir, a aplicação não deve carregar.
+      setLoadingUser(false);
+    }
+  }, [app]); // Executa este efeito apenas uma vez
+
+  // ====================================================================
+  // Efeito para buscar reservas na visualização de "Fazer Reserva"
+  // ====================================================================
   useEffect(() => {
-    if (!ambienteSelecionado || !dataSelecionada || !db) {
+    // Só busca se o banco de dados e o ambiente/data estiverem definidos
+    if (!db || !ambienteSelecionado || !dataSelecionada) {
       setReservas([]);
       return;
     }
@@ -188,11 +201,13 @@ export default function App() {
     );
 
     return () => unsub();
-  }, [ambienteSelecionado, dataSelecionada]);
+  }, [db, ambienteSelecionado, dataSelecionada]);
 
-  // Busca TODAS as reservas do dia para o relatório
+  // ====================================================================
+  // Efeito para buscar reservas na visualização de "Relatório"
+  // ====================================================================
   useEffect(() => {
-    if (!dataSelecionada || !db) {
+    if (!db || !dataSelecionada) {
       setRelatorioReservas([]);
       return;
     }
@@ -206,7 +221,6 @@ export default function App() {
           ...doc.data(),
         })) as Reserva[];
 
-        // Adiciona o nome do ambiente ao objeto de reserva
         const listaComNomes = lista.map((reserva) => ({
           ...reserva,
           nomeAmbiente: ambientes.find((amb) => amb.id === reserva.ambienteId)?.nome || "Desconhecido",
@@ -221,9 +235,11 @@ export default function App() {
       }
     );
     return () => unsub();
-  }, [dataSelecionada]);
+  }, [db, dataSelecionada]);
 
-  // Função para selecionar horários
+  // ====================================================================
+  // Funções de login, logout e CRUD de reservas
+  // ====================================================================
   const handleHorarioSelection = (horario: string, isChecked: boolean) => {
     if (isChecked) {
       setHorariosSelecionados([...horariosSelecionados, horario]);
@@ -232,7 +248,6 @@ export default function App() {
     }
   };
 
-  // Funções de login e logout com Google
   const loginGoogle = () => {
     if (!auth) {
       setMensagem({ tipo: "erro", texto: "Erro de autenticação. Tente novamente mais tarde." });
@@ -251,7 +266,6 @@ export default function App() {
     });
   };
 
-  // Função para salvar as reservas
   const salvarReserva = async () => {
     if (
       !ambienteSelecionado ||
@@ -301,7 +315,6 @@ export default function App() {
     }
   };
 
-  // Função para excluir uma reserva
   const excluirReserva = async (id: string) => {
     if (!db) return;
     try {
@@ -311,11 +324,15 @@ export default function App() {
       setMensagem({ tipo: "erro", texto: "Erro ao excluir reserva: " + error.message });
     }
   };
-
+  
+  // ====================================================================
+  // Renderização do aplicativo
+  // ====================================================================
   if (loadingUser) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-gray-200 font-poppins bg-slate-900">
-        Carregando...
+      <div className="flex flex-col items-center justify-center min-h-screen text-gray-200 font-poppins bg-slate-900">
+        <LoaderIcon className="animate-spin text-indigo-500 mb-4" size={48} />
+        <span className="text-xl">Carregando...</span>
       </div>
     );
   }
